@@ -1,0 +1,37 @@
+name: Deploy to Apps Script (clasp, personal token)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Restore clasp credentials
+        env:
+          CLASP_CREDENTIALS: ${{ secrets.CLASP_CREDENTIALS }}
+        run: |
+          mkdir -p $HOME
+          echo "$CLASP_CREDENTIALS" > $HOME/.clasprc.json
+          chmod 600 $HOME/.clasprc.json
+
+      - name: Push to Apps Script
+        run: |
+          clasp status
+          clasp pull || true
+          clasp push
+          clasp version "CI deploy $(date -u +%Y%m%dT%H%M%SZ)"
+          # Uncomment next line to auto-deploy the webapp
+          # clasp deploy --description "CI deploy $(date -u +%Y%m%dT%H%M%SZ)"
