@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "deploy": "node ./scripts/deploy.js"
+    "deploy": "node ./scripts/deploy.js",
+    "build:prompts": "node ./scripts/build_prompts.js",
+    "test:prompt": "node ./scripts/test_prompt.js"
   }
 }

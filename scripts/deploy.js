@@ -6,6 +6,7 @@ function run(cmd){
 }
 
 try {
+  run('node ./scripts/build_prompts.js');
   run('clasp pull');
   run('clasp push');
   run(`clasp version "deploy ${ver}"`);

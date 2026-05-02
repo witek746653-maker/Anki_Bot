@@ -2,7 +2,7 @@ name: Deploy to Apps Script (clasp, personal token)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
 
 jobs:
   deploy:

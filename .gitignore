@@ -1,4 +1,10 @@
 node_modules/
+/.clasp.json
+/.env
+*.key
+secrets.env
+backups/
+node_modules/
 .env
 service-account.json
 .clasprc.json
