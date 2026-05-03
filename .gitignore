@@ -6,6 +6,7 @@ secrets.env
 backups/
 node_modules/
 .env
+deploy.local.json
 service-account.json
 .clasprc.json
 .claspignore
