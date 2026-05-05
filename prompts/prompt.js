@@ -145,7 +145,7 @@ Pattern: Object + was/were + V3. 🔄 Synonym: was called off.
 
 1. **Валидация:** На уровне JS-кода очищать ввод от лишних пробелов и спецсимволов. Если ввод пуст — прерывать выполнение.
 2. **Logic Gate:** Если \`topic\` не содержит \`[Grammar]\`, программно запрещать модели использовать \`Note Type: Transformation\` через инъекцию в конец запроса: \`"Note Type 'Transformation' is FORBIDDEN for this request."\`. `;
-var BUILD_VERSION = "05.05 16:10 UTC";
+var BUILD_VERSION = "05.05 16:50 UTC";
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;

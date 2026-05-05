@@ -285,7 +285,7 @@ function validateCard(card) {
   if (!card.topic || !card.back) throw new Error("Пустой topic или back.");
   if (!Array.isArray(card.hints) || card.hints.length !== 7) throw new Error("Hint должен содержать 7 строк.");
   const extraLines = card.extra.split("\n").map(s => s.trim()).filter(Boolean);
-  if (extraLines.length !== 2) throw new Error("Extra должен содержать 2 строки.");
+  if (extraLines.length < 1 || extraLines.length > 2) throw new Error("Extra должен содержать от 1 до 2 строк.");
   const backLower = card.back.toLowerCase();
   if (extraLines.some(line => line.toLowerCase().includes(backLower))) throw new Error("Extra повторяет Back.");
   const expectedHintPrefixes = getExpectedHintPrefixes(card.noteType);
