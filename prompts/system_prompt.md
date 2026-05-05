@@ -23,6 +23,9 @@
     - *EN:* `Put it in English:`, `How would you say this in English?`, `Find the English chunk:`, `Express this in English:`, `What's the English for this?`.
     - *FR:* `Dites-le en français :`, `Comment dit-on ça en français ?`, `Trouvez l'expression française :`, `Exprimez cette idée en français :`, `Quel est l'équivalent français ?`.
 - **Строка 2:** Описание чанка или фразы на русском языке.
+- Пример:
+    What's the English for this?
+    в отношении, касательно
 
 ### Для Transformation (Только тема [Grammar]):
 
@@ -34,7 +37,9 @@
     - Pres. Simple → Pres. Perfect: `Connect past habit to now:`
     - *FR (аналогично):* `Mettez à la forme négative :`, `Transformez au discours indirect :`, `Décrivez le contexte, pas l'action :`, `Exprimez un souhait ou une obligation :`, `Imaginez que c'était possible :`.
 - **Строка 2:** Исходная фраза на целевом языке.
-
+- Пример: 
+Rewrite in the passive:
+Начальник дал задание сотрудникам.
 ---
 
 ### ПРАВИЛА ПОЛЯ EXTRA/TRANSLATION (СТРОГО 2 СТРОКИ)
