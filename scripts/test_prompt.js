@@ -15,7 +15,11 @@ const checks = [
   'Back/Answer',
   'Hint',
   'A2',
-  'B1'
+  'B1',
+  'TARGET CHUNK INVARIANT',
+  'TYPE CONTRACTS',
+  'ПРАВИЛА ПРИ СМЕНЕ NOTE TYPE',
+  'Back/Answer ОБЯЗАН быть точной копией targetChunk'
 ];
 
 let failed = [];

@@ -39,7 +39,7 @@ function doPost(e) {
         sendTelegram("sendMessage", { chat_id: chatId, text: "Для одного слова пришлите обычное слово буквами." });
       } else {
         sendTyping(chatId);
-        const aiResponse = callOpenAI(text);
+        const aiResponse = callOpenAI(text, text);
         const draftId = "draft_" + update.message.message_id;
         cache.put(draftId, JSON.stringify(aiResponse), 1800);
         sendDraft(chatId, aiResponse, draftId);
@@ -101,7 +101,7 @@ function sendChunkSuggestions(chatId, word, suggestions) {
   });
 }
 
-function callOpenAI(prompt, systemOverride = SYSTEM_PROMPT) {
+function callOpenAI(prompt, targetChunk = "", systemOverride = SYSTEM_PROMPT) {
   const payload = {
     model: "gpt-4o-mini",
     temperature: 0,
@@ -136,10 +136,10 @@ function callOpenAI(prompt, systemOverride = SYSTEM_PROMPT) {
     payload: JSON.stringify(payload)
   });
   const rawCard = JSON.parse(parseOpenAIResponse(res).choices[0].message.content);
-  return normalizeAndValidateCard(rawCard);
+  return normalizeAndValidateCard(rawCard, targetChunk);
 }
 
-function normalizeAndValidateCard(card) {
+function normalizeAndValidateCard(card, targetChunk = "") {
   const normalized = {
     noteType: normalizeText(card.noteType),
     lang: normalizeText(card.lang),
@@ -150,8 +150,11 @@ function normalizeAndValidateCard(card) {
     extra: normalizeText(card.extra),
     hints: Array.isArray(card.hints) ? card.hints.map(normalizeText).filter(Boolean) : []
   };
+  normalized.hints = normalizeHintsByNoteType(normalized.noteType, normalized.hints);
   normalized.extra = sanitizeExtra(normalized.extra, normalized.back, normalized.hints);
   normalized.extra = ensureTwoLineExtra(normalized);
+  enforceTypeContracts(normalized);
+  enforceTargetChunkInvariant(normalized, targetChunk);
   validateCard(normalized);
   return normalized;
 }
@@ -173,23 +176,80 @@ function sanitizeExtra(extra, back, hints) {
 
 function ensureTwoLineExtra(card) {
   let lines = card.extra.split("\n").map(line => line.trim()).filter(Boolean).slice(0, 2);
-  if (["Cloze", "Reverse"].includes(card.noteType) && card.hints && card.hints.length > 1) {
-    const synonymLine = card.hints[1];
-    if (lines.length < 2) { while (lines.length < 2) lines.push(""); }
-    lines[1] = synonymLine || "Синоним уточните вручную.";
-  } else {
-    if (lines.length === 0) lines.push("Смысл уточните вручную.");
-    if (lines.length === 1) lines.push(getHintFallback(card));
-  }
+  if (lines.length === 0) lines.push("Перевод уточните вручную.");
+  if (lines.length === 1) lines.push(getExtraSecondLineFallback(card));
   return lines.join("\n");
+}
+
+function getExtraSecondLineFallback(card) {
+  if (card.noteType === "Transformation") return "Грамматический паттерн: уточните вручную.";
+  if (card.noteType === "Dictation") return "Модель: spelling/pronunciation note.";
+  return "Модель: chunk + [noun/gerund/context].";
+}
+
+function extractHintContent(hint) {
+  if (!hint) return "";
+  let content = hint.includes(':') ? hint.split(':').slice(1).join(':').trim() : hint.trim();
+  content = content.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}]/gu, '').trim();
+  return content;
+}
+
+function getBuildVersionLabel() {
+  const now = new Date();
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const hh = String(now.getUTCHours()).padStart(2, "0");
+  const min = String(now.getUTCMinutes()).padStart(2, "0");
+  return `${dd}.${mm} ${hh}:${min} UTC`;
+}
+
+function getExpectedHintPrefixes(noteType) {
+  return noteType === "Transformation"
+    ? ["🧱 Structure:", "🎯 Trigger:", "🎭 Scenario:", "📖 Definition:", "👁️ Visual:", "↔️ Contrast:", "⚠️ False Friend:"]
+    : ["🧱 Structure:", "🔄 Synonym:", "🎭 Scenario:", "📖 Definition:", "👁️ Visual:", "🔗 Collocation:", "🎚️ Register:"];
+}
+
+function normalizeHintsByNoteType(noteType, hints) {
+  const expected = getExpectedHintPrefixes(noteType);
+  const source = Array.isArray(hints) ? hints.filter(Boolean).map(normalizeHintAliases) : [];
+  const normalized = expected.map((prefix, index) => {
+    const sameIndex = source[index] || "";
+    if (sameIndex.startsWith(prefix)) return sameIndex;
+    const byPrefix = source.find(h => h.startsWith(prefix));
+    if (byPrefix) return byPrefix;
+    const content = extractHintContent(sameIndex);
+    const fallback = prefix === "🎚️ Register:"
+      ? "Neutral — suitable for both spoken and written English."
+      : "уточните вручную.";
+    return content ? `${prefix} ${content}` : `${prefix} ${fallback}`;
+  });
+  return normalized.slice(0, 7).map((line, index) => {
+    if (expected[index] !== "🎚️ Register:") return line;
+    return normalizeRegisterLine(line);
+  });
+}
+
+function normalizeHintAliases(hint) {
+  let line = String(hint || "").trim();
+  line = line.replace(/^📦\s*Structure:/, "🧱 Structure:");
+  line = line.replace(/^🧷\s*Collocation:/, "🔗 Collocation:");
+  return line;
+}
+
+function normalizeRegisterLine(line) {
+  const prefix = "🎚️ Register:";
+  const content = extractHintContent(line);
+  if (!content || /отсутств|none|n\/a/i.test(content)) {
+    return `${prefix} Neutral — suitable for both spoken and written English.`;
+  }
+  return `${prefix} ${content}`;
 }
 
 function getHintFallback(card) {
   const backLower = card.back.toLowerCase();
   for (const hint of card.hints) {
     if (!hint) continue;
-    let content = hint.includes(':') ? hint.split(':').slice(1).join(':').trim() : hint;
-    content = content.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}]/gu, '').trim();
+    const content = extractHintContent(hint);
     if (content && !content.toLowerCase().includes(backLower)) return content;
   }
   if (card.noteType === "Transformation") return "Грамматическую помету уточните вручную.";
@@ -210,20 +270,53 @@ function validateCard(card) {
   if (extraLines.length !== 2) throw new Error("Extra должен содержать 2 строки.");
   const backLower = card.back.toLowerCase();
   if (extraLines.some(line => line.toLowerCase().includes(backLower))) throw new Error("Extra повторяет Back.");
-  const expectedHintPrefixes = card.noteType === "Transformation"
-    ? ["🧱 Structure:", "🎯 Trigger:", "🎭 Scenario:", "📖 Definition:", "👁️ Visual:", "↔️ Contrast:", "⚠️ False Friend:"]
-    : ["🧱 Structure:", "🔄 Synonym:", "🎭 Scenario:", "📖 Definition:", "👁️ Visual:", "🔗 Collocation:", "🎚️ Register:"];
+  const expectedHintPrefixes = getExpectedHintPrefixes(card.noteType);
   expectedHintPrefixes.forEach((prefix, index) => {
     if (!card.hints[index] || !card.hints[index].startsWith(prefix)) throw new Error(`Ошибка в Hint: ${prefix}`);
   });
+  const hintSet = {};
+  card.hints.forEach(h => { hintSet[h.toLowerCase()] = true; });
+  if (extraLines.some(line => hintSet[line.toLowerCase()])) throw new Error("Extra содержит строку из Hint.");
+}
+
+function enforceTypeContracts(card) {
+  if (card.noteType === "Cloze") {
+    card.front = enforceClozeFront(card.front, card.back);
+  }
+}
+
+function enforceClozeFront(front, back) {
+  const cleanFront = normalizeText(front);
+  const escapedBack = escapeRegex(back);
+  const hasExact = new RegExp(`\\{\\{c1::\\s*${escapedBack}\\s*\\}\\}`, "i").test(cleanFront);
+  if (hasExact) return cleanFront;
+  const plainBackRegex = new RegExp(escapedBack, "i");
+  if (plainBackRegex.test(cleanFront)) {
+    return cleanFront.replace(plainBackRegex, `{{c1::${back}}}`);
+  }
+  return `Use the chunk in context: {{c1::${back}}}.`;
+}
+
+function enforceTargetChunkInvariant(card, targetChunk) {
+  const normalizedTarget = normalizeText(targetChunk);
+  if (!normalizedTarget) return;
+  card.back = normalizedTarget;
+  if (card.noteType === "Cloze") {
+    card.front = enforceClozeFront(card.front, card.back);
+  }
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function sendDraft(chatId, data, draftId, messageId = null) {
   const chunkName = data.back.replace(/\*\*/g, '');
+  const buildVersion = getBuildVersionLabel();
   const hintsFormatted = data.hints.map(h => `<code>${h}</code>`).join('\n');
   const cleanBack = data.back.replace(/\*\*/g, '');
   const displayFront = (data.noteType === "Dictation") ? "<i>🎧 [Audio Mode]</i>" : `<blockquote><code>${data.front}</code></blockquote>`;
-  const text = `<b>🏷️ ПРЕДПРОСМОТР [v.NEW]:</b> <b>${chunkName}</b>\n` +
+  const text = `<b>🏷️ ПРЕДПРОСМОТР v.${buildVersion}:</b> <b>${chunkName}</b>\n` +
                `━━━━━━━━━━━━━━━━━━\n` +
                `<b>Type:</b> ${data.noteType}\n` +
                `<b>Lang/Diff:</b> <code>${data.lang}</code> | <code>${data.difficulty}</code>\n` +
@@ -253,7 +346,7 @@ function handleCallback(query) {
   if (action === "gen_from_chunk") {
     const chunk = cache.get(parts[1]);
     if (!chunk) { sendTelegram("sendMessage", { chat_id: query.message.chat.id, text: "Черновик устарел." }); return; }
-    const aiResponse = callOpenAI(`Create a card for this chunk: "${chunk}"`);
+    const aiResponse = callOpenAI(`Create a card for this chunk: "${chunk}"`, chunk);
     const newDraftId = "draft_" + query.message.message_id;
     cache.put(newDraftId, JSON.stringify(aiResponse), 1800);
     sendDraft(query.message.chat.id, aiResponse, newDraftId);
@@ -262,7 +355,7 @@ function handleCallback(query) {
   const draft = JSON.parse(cache.get(draftId));
   if (!draft) return;
   if (action === "save") {
-    const safeDraft = normalizeAndValidateCard(draft);
+    const safeDraft = normalizeAndValidateCard(draft, draft.back);
     cache.put(draftId, JSON.stringify(safeDraft), 1800);
     saveToSheet(safeDraft);
     const chunk = safeDraft.back.replace(/\*\*/g, '');
@@ -275,7 +368,13 @@ function handleCallback(query) {
     const opts = (field === "topic") ? getTopicList(draft.lang) : (field === "noteType" ? ["Cloze", "Reverse", "Transformation", "Dictation"] : (field === "lang" ? ["EN", "FR"] : ["A1", "A2", "A2→B1", "B1", "B1→B2"]));
     const buttons = opts.map(o => [{ text: o, callback_data: `set|${draftId}|${field}|${o}` }]);
     buttons.push([{ text: "⬅️ Назад", callback_data: `back|${draftId}` }]);
-    sendTelegram("editMessageText", { chat_id: query.message.chat.id, message_id: query.message.message_id, text: `Выберите ${field}:`, reply_markup: { inline_keyboard: buttons } });
+    sendTelegram("editMessageText", {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      text: `<b>✏️ Редактирование [v.NEW]</b>\nВыберите ${field}:`,
+      parse_mode: "HTML",
+      reply_markup: { inline_keyboard: buttons }
+    });
   }
   if (action === "set") {
     sendTelegram("editMessageText", { chat_id: query.message.chat.id, message_id: query.message.message_id, text: "🔄 <i>Рефакторинг...</i>", parse_mode: "HTML" });
@@ -289,13 +388,39 @@ function handleCallback(query) {
   if (action === "ask") {
     const field = parts[2];
     sendTelegram("sendMessage", { chat_id: query.message.chat.id, text: `Введите значение для ${field}:`, reply_markup: { force_reply: true } });
-    cache.put(`state_${query.message.chat.id}`, JSON.stringify({draftId, field}), 600);
+    sendTelegram("sendMessage", {
+      chat_id: query.message.chat.id,
+      text: "Если передумали, вернитесь к карточке:",
+      reply_markup: { inline_keyboard: [[{ text: "⬅️ Назад", callback_data: `back|${draftId}` }]] }
+    });
+    cache.put(`state_${query.message.chat.id}`, JSON.stringify({ draftId, field, messageId: query.message.message_id }), 600);
   }
 }
 
 function aiRefactor(oldCard, field, value) {
-  const prompt = `Current card: ${JSON.stringify(oldCard)}. CHANGE FIELD "${field}" TO "${value}". REGENERATE all other fields so they are linguistically correct.`;
-  return callOpenAI(prompt);
+  const immutable = {
+    back: normalizeText(oldCard.back),
+    lang: normalizeText(oldCard.lang),
+    difficulty: normalizeText(oldCard.difficulty)
+  };
+  const prompt = `Current card JSON: ${JSON.stringify(oldCard)}.
+Target operation: CHANGE ONLY FIELD "${field}" TO "${value}".
+Hard invariants:
+1) Keep Back/Answer EXACTLY unchanged and equal to "${immutable.back}".
+2) Keep lang and difficulty unchanged unless the edited field is exactly "lang" or "difficulty".
+3) Reformat structure for the target noteType, but DO NOT replace chunk semantics.
+4) Never paraphrase, synonymize, lemmatize, or POS-convert Back/Answer.
+Return valid JSON matching schema only.`;
+  const refactored = callOpenAI(prompt, immutable.back);
+  return enforceImmutableRefactorFields(oldCard, refactored, field, immutable);
+}
+
+function enforceImmutableRefactorFields(oldCard, refactoredCard, field, immutable) {
+  const safe = Object.assign({}, refactoredCard);
+  safe.back = immutable.back;
+  if (field !== "lang") safe.lang = immutable.lang;
+  if (field !== "difficulty") safe.difficulty = immutable.difficulty;
+  return normalizeAndValidateCard(safe, immutable.back);
 }
 
 function handleEditReply(update) {
@@ -303,10 +428,11 @@ function handleEditReply(update) {
   const state = JSON.parse(cache.get(`state_${update.message.chat.id}`));
   if (!state) return;
   let draft = JSON.parse(cache.get(state.draftId));
+  if (!draft) return;
   const newText = update.message.text;
   if (state.field === "hints") { draft.hints = newText.split(',').map(s => s.trim()); } else { draft[state.field] = newText; }
   cache.put(state.draftId, JSON.stringify(draft), 1800);
-  sendDraft(update.message.chat.id, draft, state.draftId);
+  sendDraft(update.message.chat.id, draft, state.draftId, state.messageId || null);
 }
 
 function getTopicList(lang) {
@@ -359,4 +485,33 @@ function debugConfig() {
   Logger.log("SHEET_ID: " + !!SHEET_ID);
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
   Logger.log("Sheet found: " + !!sheet);
+}
+
+function getWebhookInfoAdmin() {
+  const res = UrlFetchApp.fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/getWebhookInfo`, {
+    method: "get",
+    muteHttpExceptions: true
+  });
+  Logger.log(res.getContentText());
+  return res.getContentText();
+}
+
+function setWebhookAdmin(url) {
+  const payload = {
+    url: url,
+    allowed_updates: ["message", "callback_query"]
+  };
+  const res = UrlFetchApp.fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/setWebhook`, {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+  Logger.log(res.getContentText());
+  return res.getContentText();
+}
+
+function setWebhookToCurrentDeploymentAdmin() {
+  const webAppUrl = ScriptApp.getService().getUrl();
+  return setWebhookAdmin(webAppUrl);
 }

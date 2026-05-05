@@ -12,15 +12,19 @@ if (!fs.existsSync(mdPath)) {
 }
 
 const md = fs.readFileSync(mdPath, 'utf8');
+const now = new Date();
+const buildVersion = `${String(now.getUTCDate()).padStart(2, '0')}.${String(now.getUTCMonth() + 1).padStart(2, '0')} ${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')} UTC`;
 
 // Escape backticks to safely embed in template literal
 const safe = md.replace(/`/g, '\\`');
 
 const js = `// Auto-generated from prompts/system_prompt.md — DO NOT EDIT (edit the .md instead)
 var SYSTEM_PROMPT = ` + '`' + `${safe}` + '`' + `;
+var BUILD_VERSION = "${buildVersion}";
 
 // Export for Node-based tests (optional)
 if (typeof module !== 'undefined' && module.exports) module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
+if (typeof module !== 'undefined' && module.exports) module.exports.BUILD_VERSION = BUILD_VERSION;
 `;
 
 fs.writeFileSync(outPath, js, 'utf8');
