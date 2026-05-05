@@ -181,8 +181,8 @@ Topic: [Discourse Markers] : 🗞️ Nouvelles/Élections
 Front/Question: Depuis les élections, tout le monde {{c1::n'arrête pas de}} en parler au café.
 Back/Answer: n'arrête pas de
 Extra/Translation:
-не перестаёт (делать что-то)
-ne f. | ne...pas de + infinitif
+После выборов все только и делают, что говорят об этом в кафе.
+n'arrête pas de [pleuvoir / travailler / se plaindre].
 Hint:
 🧱 Structure: ne + [verbe] + pas + de + [infinitif].
 🔄 Synonym: Continuer de / sans cesse.
@@ -197,12 +197,12 @@ Note Type: Reverse
 Subject/Lang: EN
 Difficulty: B1
 Topic: [Phrasal Verbs] : 💻 Bugs/Slack
-Front/Question: Find the English chunk:
-сдаться, бросить попытки решить проблему
-Back/Answer: give up on
+Front/Question: Find the English chunk or translate:
+Я решил сдаться и перестал искать решение этой проблемы.
+Back/Answer: I decided to give up on finding a solution to this problem.
 Extra/Translation:
-сдаться, отказаться от чего-либо
-give up on + noun / gerund
+бросить попытки, опустить руки, отказаться от (идеи/задачи).
+Обязательное использование предлога 'on' перед существительным/герундием.
 Hint:
 🧱 Structure: give up + on + noun / -ing form.
 🔄 Synonym: To abandon / to stop trying.
@@ -230,6 +230,24 @@ Hint:
 📖 Definition: Reformuler ce que quelqu'un a dit sans citer ses mots exacts.
 👁️ Visual: Une personne qui chuchote à l'oreille d'une autre ce qu'a dit le chef.
 ↔️ Contrast: Au discours direct, on cite les mots exacts ; ici, on les reformule.
+
+— ПРИМЕР 4: EN | Dictation —
+Note Type: Dictation
+Subject/Lang: EN
+Difficulty: B1
+Topic: [Daily Life] : 🏠 Housing
+Front/Question: (Audio of the phrase)
+Back/Answer: We need to put up with the noise until the construction ends.
+Extra/Translation:
+Нам нужно смириться с шумом, пока не закончится стройка.
+Hint:
+🧱 Structure: verb + preposition + -ing / noun.
+🔄 Synonym: To tolerate or endure.
+🎭 Scenario: Complaining about a noisy neighbor or a difficult situation.
+📖 Definition: To accept someone or something that is unpleasant.
+👁️ Visual: A person wearing earplugs while someone is shouting.
+🔗 Collocation: Put up with the noise / put up with the heat.
+🎚️ Register: Neutral — suitable for both spoken and written English.
 
 ИНСТРУКЦИЯ ПО ГЕНЕРАЦИИ ПОДСКАЗОК
 Подсказки всегда на целевом языке (EN или FR).
@@ -320,7 +338,7 @@ Hint: Это отдельное поле JSON (массив hints). ЗАПРЕЩ
 9. JSON содержит только нужные ключи и только контент своих полей.
 Если хотя бы один пункт нарушен, перепиши ответ до полного соответствия.
 `;
-var BUILD_VERSION = "05.05 11:50 UTC";
+var BUILD_VERSION = "05.05 12:19 UTC";
 
 // Export for Node-based tests (optional)
 if (typeof module !== 'undefined' && module.exports) module.exports.SYSTEM_PROMPT = SYSTEM_PROMPT;
