@@ -88,24 +88,37 @@ function sendChunkSuggestions(chatId, word, suggestions) {
     return;
   }
   const cache = CacheService.getScriptCache();
-  const buttons = suggestions.map(function(s, index) {
+  const buttons = suggestions.map(function (s, index) {
     const chunkId = `chunk_${chatId}_${Date.now()}_${index}`;
     cache.put(chunkId, s, 1800);
     return [{ text: s, callback_data: `gen_from_chunk|${chunkId}` }];
   });
-  sendTelegram("sendMessage", { 
-    chat_id: chatId, 
-    text: `🔍 Чанки для слова <b>${word}</b>:`, 
-    parse_mode: "HTML", 
-    reply_markup: { inline_keyboard: buttons } 
+  sendTelegram("sendMessage", {
+    chat_id: chatId,
+    text: `🔍 Чанки для слова <b>${word}</b>:`,
+    parse_mode: "HTML",
+    reply_markup: { inline_keyboard: buttons }
   });
 }
 
 function callOpenAI(prompt, targetChunk = "", systemOverride = SYSTEM_PROMPT) {
+  // 1. Программный Роутер (Router Guard)
+  // Проверяем, есть ли в запросе признаки грамматики
+  const isGrammar = prompt.toLowerCase().includes("grammar") ||
+    prompt.toLowerCase().includes("passive") ||
+    prompt.toLowerCase().includes("speech");
+
+  const routerGuard = isGrammar
+    ? "\nMODE: Grammar transformation allowed."
+    : "\nCRITICAL: Topic is NOT [Grammar]. Note Type 'Transformation' is FORBIDDEN. Use Reverse or Cloze.";
+
   const payload = {
     model: "gpt-4o-mini",
     temperature: 0,
-    messages: [{ role: "system", content: systemOverride }, { role: "user", content: prompt }],
+    messages: [
+      { role: "system", content: systemOverride + routerGuard },
+      { role: "user", content: prompt }
+    ],
     response_format: {
       type: "json_schema",
       json_schema: {
@@ -129,13 +142,18 @@ function callOpenAI(prompt, targetChunk = "", systemOverride = SYSTEM_PROMPT) {
       }
     }
   };
+
   const res = UrlFetchApp.fetch("https://api.openai.com/v1/chat/completions", {
     method: "post",
     headers: { "Authorization": "Bearer " + OPENAI_API_KEY, "Content-Type": "application/json" },
     muteHttpExceptions: true,
     payload: JSON.stringify(payload)
   });
-  const rawCard = JSON.parse(parseOpenAIResponse(res).choices[0].message.content);
+
+  const response = parseOpenAIResponse(res);
+  const rawCard = JSON.parse(response.choices[0].message.content);
+
+  // Возвращаем нормализованную карту
   return normalizeAndValidateCard(rawCard, targetChunk);
 }
 
@@ -146,16 +164,24 @@ function normalizeAndValidateCard(card, targetChunk = "") {
     difficulty: normalizeText(card.difficulty),
     topic: normalizeText(card.topic),
     front: normalizeText(card.front),
-    back: normalizeText(card.back),
+    back: normalizeText(card.back), // Изначальный текст
     extra: normalizeText(card.extra),
     hints: Array.isArray(card.hints) ? card.hints.map(normalizeText).filter(Boolean) : []
   };
+
+  // Принудительно делаем Back жирным, если ИИ забыл это сделать
+  if (!normalized.back.startsWith("**")) {
+    normalized.back = `**${normalized.back}**`;
+  }
+
   normalized.hints = normalizeHintsByNoteType(normalized.noteType, normalized.hints);
   normalized.extra = sanitizeExtra(normalized.extra, normalized.back, normalized.hints);
   normalized.extra = ensureTwoLineExtra(normalized);
+
   enforceTypeContracts(normalized);
   enforceTargetChunkInvariant(normalized, targetChunk);
   validateCard(normalized);
+
   return normalized;
 }
 
@@ -164,28 +190,27 @@ function normalizeText(value) {
 }
 
 function sanitizeExtra(extra, back, hints) {
-  const backLower = back.toLowerCase();
+  const backLower = back.replace(/\*\*/g, '').toLowerCase();
   const hintSet = {};
   hints.forEach(h => { hintSet[h.toLowerCase()] = true; });
+
   const cleanedLines = extra.split("\n").map(line => line.trim()).filter(Boolean)
-    .filter(line => !/^(hint|hints|front|back|topic|type)\s*:/i.test(line))
+    // Добавили "модель" в список фильтрации
+    .filter(line => !/^(hint|hints|front|back|topic|type|модель)\s*:/i.test(line))
     .filter(line => !hintSet[line.toLowerCase()])
     .filter(line => !backLower || !line.toLowerCase().includes(backLower));
+
   return cleanedLines.slice(0, 2).join("\n");
 }
 
 function ensureTwoLineExtra(card) {
+  // Просто берем то, что выдал ИИ, и следим, чтобы было не больше 2 строк
   let lines = card.extra.split("\n").map(line => line.trim()).filter(Boolean).slice(0, 2);
   if (lines.length === 0) lines.push("Перевод уточните вручную.");
-  if (lines.length === 1) lines.push(getExtraSecondLineFallback(card));
+  // УБРАЛИ: lines.push("Syn: —, Ant: —"); 
   return lines.join("\n");
 }
 
-function getExtraSecondLineFallback(card) {
-  if (card.noteType === "Transformation") return "Грамматический паттерн: уточните вручную.";
-  if (card.noteType === "Dictation") return "Модель: spelling/pronunciation note.";
-  return "Модель: chunk + [noun/gerund/context].";
-}
 
 function extractHintContent(hint) {
   if (!hint) return "";
@@ -209,23 +234,16 @@ function getExpectedHintPrefixes(noteType) {
     : ["🧱 Structure:", "🔄 Synonym:", "🎭 Scenario:", "📖 Definition:", "👁️ Visual:", "🔗 Collocation:", "🎚️ Register:"];
 }
 
-function normalizeHintsByNoteType(noteType, hints) {
-  const expected = getExpectedHintPrefixes(noteType);
-  const source = Array.isArray(hints) ? hints.filter(Boolean).map(normalizeHintAliases) : [];
-  const normalized = expected.map((prefix, index) => {
-    const sameIndex = source[index] || "";
-    if (sameIndex.startsWith(prefix)) return sameIndex;
-    const byPrefix = source.find(h => h.startsWith(prefix));
-    if (byPrefix) return byPrefix;
-    const content = extractHintContent(sameIndex);
-    const fallback = prefix === "🎚️ Register:"
-      ? "Neutral — suitable for both spoken and written English."
-      : "уточните вручную.";
-    return content ? `${prefix} ${content}` : `${prefix} ${fallback}`;
-  });
-  return normalized.slice(0, 7).map((line, index) => {
-    if (expected[index] !== "🎚️ Register:") return line;
-    return normalizeRegisterLine(line);
+function normalizeHintsByNoteType(type, hints) {
+  const exp = getExpectedHintPrefixes(type);
+  const src = (hints || []).map(normalizeHintAliases);
+
+  return exp.map((p, i) => {
+    // Ищем совпадение по префиксу или берем по индексу
+    const h = src.find(s => s.startsWith(p)) || src[i] || "";
+    const c = extractHintContent(h);
+    // Возвращаем контент с префиксом или только префикс, если данных нет
+    return c ? `${p} ${c}` : p;
   });
 }
 
@@ -317,15 +335,15 @@ function sendDraft(chatId, data, draftId, messageId = null) {
   const cleanBack = data.back.replace(/\*\*/g, '');
   const displayFront = (data.noteType === "Dictation") ? "<i>🎧 [Audio Mode]</i>" : `<blockquote><code>${data.front}</code></blockquote>`;
   const text = `<b>🏷️ ПРЕДПРОСМОТР v.${buildVersion}:</b> <b>${chunkName}</b>\n` +
-               `━━━━━━━━━━━━━━━━━━\n` +
-               `<b>Type:</b> ${data.noteType}\n` +
-               `<b>Lang/Diff:</b> <code>${data.lang}</code> | <code>${data.difficulty}</code>\n` +
-               `<b>Topic:</b> ${data.topic}\n\n` +
-               `<b>Front:</b>\n${displayFront}\n` +
-               `<b>Back:</b> <code>${cleanBack}</code>\n\n` +
-               `<b>Extra:</b>\n<code>${data.extra}</code>\n\n` +
-               `<b>💡 HINTS (тап для копирования):</b>\n${hintsFormatted}\n` +
-               `━━━━━━━━━━━━━━━━━━`;
+    `━━━━━━━━━━━━━━━━━━\n` +
+    `<b>Type:</b> ${data.noteType}\n` +
+    `<b>Lang/Diff:</b> <code>${data.lang}</code> | <code>${data.difficulty}</code>\n` +
+    `<b>Topic:</b> ${data.topic}\n\n` +
+    `<b>Front:</b>\n${displayFront}\n` +
+    `<b>Back:</b> <code>${cleanBack}</code>\n\n` +
+    `<b>Extra:</b>\n<code>${data.extra}</code>\n\n` +
+    `<b>💡 HINTS (тап для копирования):</b>\n${hintsFormatted}\n` +
+    `━━━━━━━━━━━━━━━━━━`;
   const keyboard = {
     inline_keyboard: [
       [{ text: "✅ СОХРАНИТЬ", callback_data: `save|${draftId}` }],
@@ -336,7 +354,7 @@ function sendDraft(chatId, data, draftId, messageId = null) {
     ]
   };
   const params = { chat_id: chatId, text: text, parse_mode: "HTML", reply_markup: keyboard };
-  if (messageId) { params.message_id = messageId; sendTelegram("editMessageText", params); } 
+  if (messageId) { params.message_id = messageId; sendTelegram("editMessageText", params); }
   else { sendTelegram("sendMessage", params); }
 }
 
@@ -436,9 +454,10 @@ function handleEditReply(update) {
 }
 
 function getTopicList(lang) {
-  const en = ["💻 Bugs/Slack", "📅 Meetings", "🤝 Interview", "💼 Work/Meaning", "🗳️ Politics", "🎨 Art/Culture", "🍿 Cinema", "🧠 Psychology", "🌍 Relocation", "🏢 Work/Culture"];
-  const fr = ["🩺 Santé/Docteur", "🔑 Location", "🛒 Magasin", "🏛️ Banque/Préfecture", "🥦 Marché", "👥 Collègues", "🌸 Fleurs/Balcon", "🗞️ Nouvelles/Élections", "🗣️ Tandem", "🖼️ Expositions", "☕ Café/Resto", "🚲 Transport"];
-  return (lang === "FR" ? fr : en).concat(["🌐 General/Abstract", "🏠 Daily Routine"]);
+  const en = ["💻 Bugs/Slack", "🤝 Meetings", "👔 Interview", "🌱 Work/Meaning", "🏛️ Politics", "🎨 Art/Culture", "🎬 Cinema", "🧠 Psychology", "✈️ Relocation", "☕ Work/Culture"];
+  const fr = ["🏥 Santé/Docteur", "🔑 Location", "🛒 Magasin", "📂 Banque/Préfecture", "🧺 Marché", "💼 Collègues", "🌸 Fleurs/Balcon", "🗞️ Nouvelles/Élections", "🗣️ Tandem", "🏛️ Expositions", "🍽️ Café/Resto", "🚌 Transport"];
+  const univ = ["🌫️ General/Abstract", "⏰ Daily Routine", "📑 Technical Docs", "🍻 Socializing/Pub", "💬 Small Talk"];
+  return (lang === "FR" ? fr : en).concat(univ);
 }
 
 function saveToSheet(d) {
